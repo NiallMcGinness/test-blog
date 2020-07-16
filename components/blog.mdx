@@ -1,0 +1,163 @@
+**Integrating HashiCorp Vault with Python scripts**
+
+
+Many organizations are held together by utility scripts patched together over the years, they start as little time savers but often end up providing important functions for customers and internal groups.
+
+Making these scripts secure is what we want, making these scripts easy to secure is how we get it, this is where [HashiCorp Vault](https://www.vaultproject.io/) steps up. You can read more about it  [here](https://learn.hashicorp.com/vault) but basically Vault is a system designed to store secrets and manage access to them.
+
+There are HTTP GUI and command line interfaces available for Vault but in this walkthrough we are going to use the cURL / HTTP interface and Python3 requests to interact with it.
+
+**Set up**
+
+
+To start, install Vault on your local machine, follow the instructions [here](https://learn.hashicorp.com/vault/getting-started/install) and initialize Vault in dev mode 
+
+```cli
+
+$ vault server -dev 
+		...
+		
+			You may need to set the following environment variable:
+			$ export VAULT_ADDR='http://127.0.0.1:8200
+		...
+		    Root Token: s.Bcu6oqhHxQIAwh8X2p6udYza
+
+```	
+
+You should see your root token displayed on start up in your terminal, as this is just a test set up and for the sake of simplicity we are going to use this as our access token, in production or a more long term test set up you should create dedicated tokens with access restricted to the minimum necessary for the script to function.
+
+With that said lets set our environment variables for our Vault url and root token, the Vault cli needs these to be set to access our Vault instance  
+```
+	
+$ export VAULT_ADDR='http://127.0.0.1:8200'
+$ export VAULT_DEV_ROOT_TOKEN_ID="s.Bcu6oqhHxQIAwh8X2p6udYza"
+
+```	
+
+Now lets put a secret in 
+
+```cli
+
+$ vault kv put secret/test test_key=test_value 
+
+```
+
+To verify that the secret has been added successfully, try a curl request 
+
+```
+	$ curl  \
+	   --header "X-Vault-Token: $VAULT_DEV_ROOT_TOKEN_ID" \                              -- request LIST  \`
+	   http://127.0.0.1:8200/v1/secret/metadata 
+```
+	
+If you’re in luck and all is working correctly you should see something like 
+```js
+	
+	{
+	  "request_id": "6c8aecc3-7547-399f-1d08-d355b1a22e5c",
+	  "lease_id": "",
+	  "renewable": false,
+	  "lease_duration": 0,
+	  "data": {
+	    "keys": ["test"]
+	  },
+	  "wrap_info": null,
+	  "warnings": null,
+	  "auth": null
+	}
+
+```
+
+If you are having any trouble at this point try 
+
+```
+
+$ vault kv list secret
+
+```
+ 
+This should perform the same role as the curl request above and may give you some clearer error messages
+
+To get our secret we run the following curl request 
+
+```
+
+$ curl  \
+ 	 --header "X-Vault-Token: $VAULT_DEV_ROOT_TOKEN_ID"   \
+  	 http://127.0.0.1:8200/v1/secret/data/test
+
+```
+
+
+And get output like 
+```js
+	{
+	  "request_id": "2e96d905-cab3-58b2-0c34-618c4d060f58",
+	     ...
+	  "data": {
+	    "data": {
+	      "test_key": "test_value"
+	    },
+	    "metadata": {
+	      ...
+	    }
+	  },
+	     ...
+	}
+```
+
+**Now add Python**
+
+The Vault client cli utility is great and you need it for some essential functions but the HTTP interface allows interoperability with a world of programming environments, I mostly use Python but there are cURL / HTTP  libraries for all major languages and using it does not require Vault to be installed on the machine running your script.
+
+```py
+# vault_example.py
+
+import requests
+
+url = 'http://127.0.0.1:8200/v1/secret/data/test'
+
+headers = {'X-Vault-Token': 's.Bcu6oqhHxQIAwh8X2p6udYza'}
+
+r = requests.get(url, headers=headers)
+
+print(r.json())
+
+```
+
+From this we can build a more robust function and think about adding it to our scripts and begin securing our workflows
+
+```py
+# vault_example_v2.py
+
+import requests
+from requests.exceptions import ConnectionError
+
+
+def get_secret(url, token):
+    has_data = False
+    d = None
+    headers = {'X-Vault-Token': token}
+
+    try:
+        r = requests.get(url, headers=headers)
+    except ConnectionError as ce:
+        print(ce)
+        return has_data, d
+
+    j = r.json()
+
+    try:
+        d = j['data']
+        has_data = True
+    except KeyError as ke:
+        print(ke)
+
+    return has_data, d
+```
+
+
+There are also dedicated libraries for using Vault, see [HVAC](https://hvac.readthedocs.io/en/stable/overview.html), in the use case I have in mind here though a simple Python wrapper around an HTTP request is enough.
+
+If your workflow requires more integration with Vault than simply requesting secrets at the start of the run then tools like HVAC may be the better option
+
